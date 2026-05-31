@@ -1,0 +1,3 @@
+ALTER TYPE "RequestType" ADD VALUE 'RERANK';
+
+ALTER TABLE "Provider" ADD COLUMN "supportsRerank" BOOLEAN NOT NULL DEFAULT false;

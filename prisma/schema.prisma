@@ -1,0 +1,698 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum RequestLogStatus {
+  SUCCESS
+  ERROR
+}
+
+enum RequestType {
+  CHAT_COMPLETION
+  EMBEDDING
+  RERANK
+}
+
+enum UsageLedgerStatus {
+  PENDING
+  FINALIZED
+  UNBILLABLE
+  FAILED
+}
+
+enum BalanceTransactionType {
+  CREDIT
+  DEBIT
+  ADJUSTMENT
+}
+
+enum TopUpPurchaseStatus {
+  CREATED
+  CHECKOUT_CREATED
+  COMPLETED
+  CREDITED
+  CANCELED
+  FAILED
+}
+
+enum PaymentProvider {
+  PAYPAL
+  ALIPAY
+  WECHAT
+}
+
+enum PaymentProviderInstanceStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum BillingResolutionType {
+  REFUND
+  COMPENSATION
+}
+
+enum BillingResolutionStatus {
+  OPEN
+  APPLIED
+  CANCELED
+}
+
+enum CaseType {
+  REFUND
+  COMPENSATION
+  MANUAL_ADJUSTMENT
+  ABUSE_REVIEW
+}
+
+enum CaseStatus {
+  OPEN
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+enum ReferralCommissionStatus {
+  PENDING
+  PAID
+}
+
+enum RedemptionCodeStatus {
+  ACTIVE
+  DISABLED
+  EXHAUSTED
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum OrganizationMemberRole {
+  OWNER
+  ADMIN
+  DEVELOPER
+  BILLING
+  VIEWER
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum RiskState {
+  NORMAL
+  RATE_LIMITED
+  RESTRICTED
+  SUSPENDED
+}
+
+enum PlanTier {
+  TRIAL
+  BUILDER
+  PRO
+  ENTERPRISE
+}
+
+enum UserRole {
+  USER
+  SUPPORT
+  OPS
+  ADMIN
+  OWNER
+  AUDITOR
+}
+
+enum AuthTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum ProviderType {
+  OPENAI_COMPATIBLE
+}
+
+enum ProviderStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum RoutePolicyConfigStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum UpstreamKeyStatus {
+  ACTIVE
+  DISABLED
+}
+
+model User {
+  id                  String               @id @default(cuid())
+  email               String               @unique
+  emailVerifiedAt     DateTime?
+  name                String?
+  passwordHash        String
+  plan                PlanTier             @default(TRIAL)
+  role                UserRole             @default(USER)
+  riskState           RiskState            @default(NORMAL)
+  referralCode        String?              @unique
+  referredByUserId    String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  apiKeys             ApiKey[]
+  requestLogs         RequestLog[]
+  userBalance         UserBalance?
+  usageLedgerEntries  UsageLedgerEntry[]
+  balanceTransactions BalanceTransaction[]
+  billingResolutions  BillingResolution[]
+  topUpPurchases      TopUpPurchase[]
+  abuseEvents         AbuseEvent[]
+  auditLogsAuthored   AuditLog[]           @relation("AuditActor")
+  auditLogsTargeted   AuditLog[]           @relation("AuditTarget")
+  referralsEarned     ReferralCommission[] @relation("Referrer")
+  referralsMade       ReferralCommission[] @relation("Referred")
+  referredUsers       User[]               @relation("UserReferral")
+  referrer            User?                @relation("UserReferral", fields: [referredByUserId], references: [id], onDelete: SetNull)
+  authTokens          AuthToken[]
+  casesAsTarget       Case[]               @relation("CaseTarget")
+  casesAsActor        Case[]               @relation("CaseActor")
+}
+
+model AuthToken {
+  id         String        @id @default(cuid())
+  userId     String
+  email      String
+  type       AuthTokenType
+  tokenHash  String        @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, createdAt(sort: Desc)])
+  @@index([email, type, createdAt(sort: Desc)])
+  @@index([type, expiresAt])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  actorUserId  String?
+  targetUserId String?
+  action       String
+  resourceType String
+  resourceId   String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  actorUser  User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  targetUser User? @relation("AuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId, createdAt(sort: Desc)])
+  @@index([targetUserId, createdAt(sort: Desc)])
+  @@index([resourceType, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+}
+
+model Provider {
+  id          String           @id @default(cuid())
+  slug        String           @unique
+  label       String
+  type        ProviderType
+  baseUrl     String
+  testModel   String
+  supportsChat Boolean         @default(true)
+  supportsEmbeddings Boolean   @default(false)
+  supportsRerank Boolean       @default(false)
+  status      ProviderStatus   @default(ACTIVE)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  upstreamKeys UpstreamApiKey[]
+
+  @@index([status])
+}
+
+model RoutePolicyConfig {
+  id         String                  @id @default(cuid())
+  routePolicy String                 @unique
+  status     RoutePolicyConfigStatus @default(ACTIVE)
+  targets    Json
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+
+  @@index([status, updatedAt(sort: Desc)])
+}
+
+model UpstreamApiKey {
+  id                   String            @id @default(cuid())
+  providerId           String
+  displayName          String
+  keyCiphertext        String
+  keyPrefix            String
+  lastFour             String
+  baseUrlOverride      String?
+  modelGroup           String?
+  priority             Int               @default(100)
+  status               UpstreamKeyStatus @default(ACTIVE)
+  quotaLimitUsdMicros  BigInt?
+  quotaUsedUsdMicros   BigInt            @default(0)
+  dailyLimitRequests   Int?
+  dailyUsedRequests    Int               @default(0)
+  errorCount           Int               @default(0)
+  lastErrorAt          DateTime?
+  lastErrorMessage     String?
+  lastTestedAt         DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId, priority])
+  @@index([providerId, status])
+  @@index([status])
+}
+
+model ApiKey {
+  id          String       @id @default(cuid())
+  userId      String
+  name        String
+  keyPrefix   String
+  keyHash     String       @unique
+  lastFour    String
+  status      ApiKeyStatus @default(ACTIVE)
+  isEnabled   Boolean      @default(true)
+  riskState   RiskState    @default(NORMAL)
+  expiresAt   DateTime?
+  requestsPerMinuteLimit Int?
+  concurrentRequestsLimit Int?
+  dailyRequestLimit Int?
+  dailyRequestCount Int    @default(0)
+  dailyRequestWindowStart DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  requestLogs RequestLog[]
+  usageLedgerEntries UsageLedgerEntry[]
+  abuseEvents AbuseEvent[]
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, status])
+  @@index([userId, isEnabled])
+  @@index([riskState])
+}
+
+model RequestLog {
+  id               String           @id @default(cuid())
+  apiKeyId         String?
+  userId           String?
+  provider         String
+  upstreamModel    String?
+  requestedModel   String?
+  routePolicy      String?
+  fallbackUsed     Boolean          @default(false)
+  fallbackFromProvider String?
+  fallbackFromModel String?
+  routeReason      String?
+  requestType      RequestType
+  isStream         Boolean
+  status           RequestLogStatus
+  httpStatus       Int
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  latencyMs        Int?
+  errorCode        String?
+  errorMessage     String?
+  createdAt        DateTime         @default(now())
+  usageLedgerEntry UsageLedgerEntry?
+
+  apiKey ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([apiKeyId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([provider, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+}
+
+model UserBalance {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  balanceUsdMicros  BigInt   @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UsageLedgerEntry {
+  id                    String             @id @default(cuid())
+  userId                String
+  apiKeyId              String
+  requestLogId          String?            @unique
+  provider              String
+  requestedModel        String?
+  upstreamModel         String?
+  pricingVersion        String
+  pricingSnapshot       Json?
+  usageSnapshot         Json?
+  status                UsageLedgerStatus
+  isStream              Boolean
+  promptTokens          Int?
+  completionTokens      Int?
+  totalTokens           Int?
+  promptCacheHitTokens  Int?
+  promptCacheMissTokens Int?
+  reasoningTokens       Int?
+  inputCostUsdMicros    BigInt?
+  outputCostUsdMicros   BigInt?
+  totalCostUsdMicros    BigInt?
+  chargedAt             DateTime?
+  createdAt             DateTime           @default(now())
+  finalizedAt           DateTime?
+  notes                 String?
+  errorReason           String?
+
+  user               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apiKey             ApiKey               @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  requestLog         RequestLog?          @relation(fields: [requestLogId], references: [id], onDelete: SetNull)
+  balanceTransaction BalanceTransaction?
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([apiKeyId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+}
+
+model BalanceTransaction {
+  id                    String                 @id @default(cuid())
+  userId                String
+  type                  BalanceTransactionType
+  amountUsdMicros       BigInt
+  balanceBeforeUsdMicros BigInt
+  balanceAfterUsdMicros BigInt
+  usageLedgerId         String?                @unique
+  topUpPurchaseId       String?                @unique
+  billingResolutionId   String?                @unique
+  reason                String
+  createdAt             DateTime               @default(now())
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usageLedgerEntry UsageLedgerEntry? @relation(fields: [usageLedgerId], references: [id], onDelete: SetNull)
+  topUpPurchase    TopUpPurchase?    @relation(fields: [topUpPurchaseId], references: [id], onDelete: SetNull)
+  billingResolution BillingResolution? @relation(fields: [billingResolutionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([type, createdAt(sort: Desc)])
+}
+
+model BillingResolution {
+  id                   String                  @id @default(cuid())
+  userId               String
+  topUpPurchaseId      String?
+  type                 BillingResolutionType
+  status               BillingResolutionStatus @default(OPEN)
+  amountUsdMicros      BigInt
+  reason               String
+  operatorNotes        String?
+  paymentProvider      PaymentProvider?
+  providerRefundId     String?                 @unique
+  providerRefundAmountMinor Int?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  appliedAt            DateTime?
+  canceledAt           DateTime?
+
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topUpPurchase      TopUpPurchase?     @relation(fields: [topUpPurchaseId], references: [id], onDelete: SetNull)
+  balanceTransaction BalanceTransaction?
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([topUpPurchaseId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([type, createdAt(sort: Desc)])
+}
+
+model TopUpPurchase {
+  id                         String              @id @default(cuid())
+  userId                     String
+  packageId                  String
+  paymentProvider            PaymentProvider
+  paymentProviderInstanceId  String?
+  providerOrderId            String?
+  providerPaymentId          String?
+  providerEventIdLastProcessed String?
+  providerMetadata           Json?
+  amountUsdCents             Int
+  creditsUsdMicros           BigInt
+  refundedUsdMicros          BigInt              @default(0)
+  status                     TopUpPurchaseStatus @default(CREATED)
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
+  creditedAt                 DateTime?
+  refundedAt                 DateTime?
+  notes                      String?
+
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentProviderInstance PaymentProviderInstance? @relation(fields: [paymentProviderInstanceId], references: [id], onDelete: SetNull)
+  balanceTransaction BalanceTransaction?
+  billingResolutions BillingResolution[]
+  paymentWebhookEvents PaymentWebhookEvent[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([paymentProvider, paymentProviderInstanceId, createdAt(sort: Desc)])
+}
+
+model PaymentProviderInstance {
+  id                   String                        @id @default(cuid())
+  provider             PaymentProvider
+  label                String
+  status               PaymentProviderInstanceStatus @default(ACTIVE)
+  priority             Int                           @default(100)
+  supportsRefunds      Boolean                       @default(false)
+  minAmountUsdCents    Int?
+  maxAmountUsdCents    Int?
+  dailyLimitUsdCents   Int?
+  config               Json
+  createdAt            DateTime                      @default(now())
+  updatedAt            DateTime                      @updatedAt
+
+  topUpPurchases TopUpPurchase[]
+
+  @@index([provider, status, priority])
+  @@index([status, updatedAt(sort: Desc)])
+}
+
+model PaymentWebhookEvent {
+  id              String          @id
+  provider        PaymentProvider
+  eventType       String
+  topUpPurchaseId String?
+  status          String
+  errorMessage    String?
+  createdAt       DateTime        @default(now())
+  processedAt     DateTime?
+
+  topUpPurchase TopUpPurchase? @relation(fields: [topUpPurchaseId], references: [id], onDelete: SetNull)
+
+  @@index([provider, createdAt(sort: Desc)])
+  @@index([topUpPurchaseId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+}
+
+model RateLimitCounter {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  count       Int      @default(0)
+  windowStart DateTime
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
+model ConcurrencyLease {
+  id        String   @id @default(cuid())
+  scope     String
+  holderId  String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([scope, expiresAt])
+  @@index([holderId])
+  @@index([expiresAt])
+}
+
+model AbuseEvent {
+  id             String   @id @default(cuid())
+  userId         String?
+  apiKeyId       String?
+  ipAddressHash  String?
+  eventType      String
+  severity       String
+  routePolicy    String?
+  requestedModel String?
+  actualProvider String?
+  status         String
+  reasonCode     String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  apiKey ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([apiKeyId, createdAt(sort: Desc)])
+  @@index([eventType, createdAt(sort: Desc)])
+  @@index([reasonCode, createdAt(sort: Desc)])
+  @@index([ipAddressHash, createdAt(sort: Desc)])
+}
+
+model ReferralCommission {
+  id                    String                  @id @default(cuid())
+  referrerUserId        String
+  referredUserId        String                  @unique
+  amountUsdMicros       BigInt
+  sourceTransactionId   String?
+  status                ReferralCommissionStatus @default(PENDING)
+  createdAt             DateTime                @default(now())
+  paidAt                DateTime?
+
+  referrer User @relation("Referrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  referred User @relation("Referred", fields: [referredUserId], references: [id], onDelete: Cascade)
+
+  @@index([referrerUserId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+}
+
+model RedemptionCode {
+  id                    String               @id @default(cuid())
+  codeHash              String               @unique
+  codePrefix            String
+  label                 String
+  status                RedemptionCodeStatus @default(ACTIVE)
+  creditAmountUsdMicros BigInt
+  maxRedemptions        Int
+  redeemedCount         Int                  @default(0)
+  expiresAt             DateTime?
+  createdByUserId       String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  redemptions           RedemptionCodeRedemption[]
+
+  @@index([status, expiresAt])
+  @@index([createdAt(sort: Desc)])
+}
+
+model RedemptionCodeRedemption {
+  id               String   @id @default(cuid())
+  redemptionCodeId String
+  userId           String
+  balanceTransactionId String? @unique
+  createdAt        DateTime @default(now())
+
+  redemptionCode RedemptionCode @relation(fields: [redemptionCodeId], references: [id], onDelete: Cascade)
+
+  @@unique([redemptionCodeId, userId])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model Announcement {
+  id              String             @id @default(cuid())
+  status          AnnouncementStatus @default(DRAFT)
+  title           String
+  body            String
+  audience        String             @default("all")
+  startsAt        DateTime?
+  endsAt          DateTime?
+  createdByUserId String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([status, startsAt, endsAt])
+  @@index([createdAt(sort: Desc)])
+}
+
+model Organization {
+  id                  String   @id @default(cuid())
+  name                String
+  slug                String   @unique
+  billingOwnerUserId  String?
+  monthlyBudgetUsdMicros BigInt?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  members             OrganizationMember[]
+  projects            Project[]
+
+  @@index([billingOwnerUserId])
+  @@index([createdAt(sort: Desc)])
+}
+
+model OrganizationMember {
+  id             String                 @id @default(cuid())
+  organizationId String
+  userId         String
+  role           OrganizationMemberRole @default(DEVELOPER)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([role])
+}
+
+model Project {
+  id                    String        @id @default(cuid())
+  organizationId         String
+  name                  String
+  slug                  String
+  status                ProjectStatus @default(ACTIVE)
+  monthlyBudgetUsdMicros BigInt?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, status])
+}
+
+model Case {
+  id              String     @id @default(cuid())
+  type            CaseType
+  status          CaseStatus @default(OPEN)
+  targetUserId    String
+  actorUserId     String
+  amountUsdMicros BigInt?
+  reason          String?
+  metadata        Json?
+  decidedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  targetUser User @relation("CaseTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  actorUser  User @relation("CaseActor", fields: [actorUserId], references: [id], onDelete: Cascade)
+
+  @@index([status, type, createdAt(sort: Desc)])
+  @@index([targetUserId, createdAt(sort: Desc)])
+}

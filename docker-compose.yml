@@ -1,0 +1,192 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: maxapi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-maxapi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+      POSTGRES_DB: ${POSTGRES_DB:-maxapi}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-maxapi} -d ${POSTGRES_DB:-maxapi}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - maxapi-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: maxapi-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - maxapi-network
+
+  # 数据库迁移（只运行一次）
+  # 用法: docker compose --profile migrate up migrate
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maxapi-migrate
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-maxapi}:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/${POSTGRES_DB:-maxapi}?schema=public}
+    command: >
+      sh -c "npx prisma migrate deploy && npx prisma generate"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - maxapi-network
+    profiles:
+      - migrate
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maxapi-app
+    restart: unless-stopped
+    environment:
+      # 数据库
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-maxapi}:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/${POSTGRES_DB:-maxapi}?schema=public}
+
+      # 应用
+      NODE_ENV: production
+      APP_RUN_MODE: ${APP_RUN_MODE:-saas}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      PAYMENT_PUBLIC_BASE_URL: ${PAYMENT_PUBLIC_BASE_URL}
+      UPSTREAM_PLATFORM_NAME: ${UPSTREAM_PLATFORM_NAME:-MaxAPI}
+
+      # 认证
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
+      API_KEY_PEPPER: ${API_KEY_PEPPER}
+      ENABLE_SELF_SIGNUP: ${ENABLE_SELF_SIGNUP:-false}
+
+      # 计费
+      MIN_REQUEST_BALANCE_USD_MICROS: ${MIN_REQUEST_BALANCE_USD_MICROS:-100000}
+      MAX_REQUEST_COST_USD_MICROS: ${MAX_REQUEST_COST_USD_MICROS:-5000000}
+      PREFLIGHT_DEFAULT_MAX_OUTPUT_TOKENS: ${PREFLIGHT_DEFAULT_MAX_OUTPUT_TOKENS:-4096}
+      PAYMENT_CNY_RATE: ${PAYMENT_CNY_RATE:-7.2}
+
+      # Redis（外部 Upstash 或本地）
+      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL}
+      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN}
+
+      # 上游 API 提供商
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_API_KEYS: ${OPENAI_API_KEYS}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      UPSTREAM_KEY_ENCRYPTION_KEY: ${UPSTREAM_KEY_ENCRYPTION_KEY}
+      APIMART_API_KEY: ${APIMART_API_KEY}
+      APIMART_API_KEYS: ${APIMART_API_KEYS}
+      APIMART_BASE_URL: ${APIMART_BASE_URL:-https://api.apimart.ai/v1}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_API_KEYS: ${OPENROUTER_API_KEYS}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_API_KEYS: ${DEEPSEEK_API_KEYS}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GOOGLE_API_KEYS: ${GOOGLE_API_KEYS}
+      GOOGLE_BASE_URL: ${GOOGLE_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}
+
+      # 路由
+      ROUTING_STICKY_TTL_SECONDS: ${ROUTING_STICKY_TTL_SECONDS:-3600}
+
+      # PayPal
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET}
+      PAYPAL_WEBHOOK_ID: ${PAYPAL_WEBHOOK_ID}
+      PAYPAL_SANDBOX: ${PAYPAL_SANDBOX:-false}
+
+      # 支付宝
+      ALIPAY_APP_ID: ${ALIPAY_APP_ID}
+      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY}
+      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY}
+      ALIPAY_GATEWAY_URL: ${ALIPAY_GATEWAY_URL:-https://openapi.alipay.com/gateway.do}
+
+      # 微信支付
+      WECHAT_APP_ID: ${WECHAT_APP_ID}
+      WECHAT_MCH_ID: ${WECHAT_MCH_ID}
+      WECHAT_API_V3_KEY: ${WECHAT_API_V3_KEY}
+      WECHAT_PRIVATE_KEY: ${WECHAT_PRIVATE_KEY}
+      WECHAT_CERT_SERIAL_NO: ${WECHAT_CERT_SERIAL_NO}
+      WECHAT_PLATFORM_PUBLIC_KEY: ${WECHAT_PLATFORM_PUBLIC_KEY}
+
+      # 邮件
+      AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+
+      # 限流
+      RATE_LIMIT_API_KEY_PER_MINUTE: ${RATE_LIMIT_API_KEY_PER_MINUTE:-60}
+      RATE_LIMIT_USER_PER_MINUTE: ${RATE_LIMIT_USER_PER_MINUTE:-120}
+      RATE_LIMIT_IP_PER_MINUTE: ${RATE_LIMIT_IP_PER_MINUTE:-300}
+      CONCURRENT_API_KEY_LIMIT: ${CONCURRENT_API_KEY_LIMIT:-3}
+      CONCURRENT_USER_LIMIT: ${CONCURRENT_USER_LIMIT:-10}
+
+      # 风控
+      RISK_ESCALATION_LIMIT_HITS: ${RISK_ESCALATION_LIMIT_HITS:-5}
+      RISK_MAX_REQUEST_BODY_CHARS: ${RISK_MAX_REQUEST_BODY_CHARS:-120000}
+      RISK_NEW_USER_AGE_HOURS: ${RISK_NEW_USER_AGE_HOURS:-24}
+      RISK_NEW_USER_MAX_REQUEST_BODY_CHARS: ${RISK_NEW_USER_MAX_REQUEST_BODY_CHARS:-12000}
+
+      # 告警
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL}
+      ALERT_DEDUP_COOLDOWN_SECONDS: ${ALERT_DEDUP_COOLDOWN_SECONDS:-900}
+      ALERT_PENDING_USAGE_THRESHOLD: ${ALERT_PENDING_USAGE_THRESHOLD:-25}
+      INTERNAL_OPS_EMAILS: ${INTERNAL_OPS_EMAILS}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - maxapi-network
+
+  # Nginx 反向代理 + SSL（可选）
+  # 用法: docker compose --profile nginx up nginx
+  nginx:
+    image: nginx:alpine
+    container_name: maxapi-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - app
+    networks:
+      - maxapi-network
+    profiles:
+      - nginx
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  maxapi-network:
+    driver: bridge

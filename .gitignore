@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+dist/
+
+# Environment variables (never commit secrets!)
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Database
+prisma/dev.db
+*.db
+
+# Testing
+coverage/
+test-results/
+playwright-report/
+e2e/.auth/
+
+# Build cache
+tsconfig.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Screenshots / temp
+screenshots/
+
+# Old builds
+*.zip
+
